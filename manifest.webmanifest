@@ -1,0 +1,16 @@
+{
+  "name": "今晚吃什麼",
+  "short_name": "吃什麼",
+  "description": "北投到石牌的晚餐選擇器",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf6f0",
+  "theme_color": "#e07030",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
