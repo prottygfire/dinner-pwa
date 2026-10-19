@@ -3,11 +3,19 @@
 var DinnerLogic = (function () {
   var FORMS = ['飯', '麵', '鍋物', '肉', '輕食', '小吃'];
   var TAGS = ['健康', '多菜', '清爽', '重口'];
-  var DISTANCE_BANDS = [
-    { id: 'near', label: '很近', hint: '步行 15 分鐘內（約 1.2 公里）', maxKm: 1.2 },
-    { id: 'mid', label: '騎車可到', hint: '騎車約 10 分鐘（2.5 公里內）', maxKm: 2.5 },
-    { id: 'all', label: '都可以', hint: '北投到石牌（4 公里內）', maxKm: 99 }
-  ];
+  // weekday = Beitou to Shipai only; outing = the rest of Taipei as well (weekend trips).
+  var MODES = {
+    near: { label: '平日就近', baseKm: 4.5, bands: [
+      { id: 'near', label: '很近', hint: '步行 15 分鐘內（約 1.2 公里）', maxKm: 1.2 },
+      { id: 'mid', label: '騎車可到', hint: '騎車約 10 分鐘（2.5 公里內）', maxKm: 2.5 },
+      { id: 'all', label: '都可以', hint: '北投到石牌', maxKm: 4.5 }
+    ] },
+    outing: { label: '假日出遊', baseKm: 99, bands: [
+      { id: 'local', label: '北投石牌', hint: '住家附近就好（4.5 公里內）', maxKm: 4.5 },
+      { id: 'city', label: '北部市區', hint: '士林、大同、中山一帶（約 10 公里內）', maxKm: 10 },
+      { id: 'all', label: '全台北', hint: '想去哪都行', maxKm: 99 }
+    ] }
+  };
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function dateKey(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -67,6 +75,21 @@ var DinnerLogic = (function () {
       .sort(function (a, b) { return b.count - a.count; });
   }
 
+  // "Surprise me": one place the user has not just had and is not already a regular, leaning towards places they saved.
+  function surprise(places, sel, rng) {
+    var pool = filter(places, sel).filter(function (p) { return p.source !== 'common'; });
+    if (!pool.length) pool = filter(places, sel);
+    var w = function (p) { return weight(p) * (p.source === 'saved' ? 1.8 : 1) * (p.source === 'reviewed' ? 1.3 : 1); };
+    var total = pool.reduce(function (s, p) { return s + w(p); }, 0), r = rng() * total;
+    for (var i = 0; i < pool.length; i++) { r -= w(pool[i]); if (r < 0) return pool[i]; }
+    return pool.length ? pool[pool.length - 1] : null;
+  }
+
+  // Google photo URL for a stored thumbnail key (size is part of the URL).
+  function photoUrl(key, w, h) {
+    return key ? 'https://lh3.googleusercontent.com/' + key + '=w' + w + '-h' + h + '-k-no' : '';
+  }
+
   // Weight favours well-rated, well-reviewed places. Unrated entries (street food) get an average weight.
   function weight(p) {
     var r = p.rating == null ? 4.2 : p.rating;
@@ -103,7 +126,7 @@ var DinnerLogic = (function () {
   }
 
   return {
-    FORMS: FORMS, TAGS: TAGS, DISTANCE_BANDS: DISTANCE_BANDS,
+    FORMS: FORMS, TAGS: TAGS, MODES: MODES, surprise: surprise, photoUrl: photoUrl,
     dateKey: dateKey, daysBetween: daysBetween, recentNames: recentNames,
     matches: matches, filter: filter, optionCounts: optionCounts, weight: weight, pick: pick,
     mealRecord: mealRecord, mergeHistory: mergeHistory

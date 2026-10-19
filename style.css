@@ -48,3 +48,14 @@ form.settings label { display: block; margin: 12px 0 4px; font-weight: 600; }
 form.settings input { width: 100%; padding: 10px; border: 1.5px solid var(--line); border-radius: 10px; font: inherit; background: var(--card); color: var(--ink); }
 .status { font-size: .85rem; color: var(--muted); margin-top: 8px; }
 .status.err { color: var(--warn); }
+.seg { display: flex; background: var(--accent-soft); border-radius: 12px; padding: 3px; margin: 4px 0 6px; }
+.segbtn { flex: 1; border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600; padding: 9px 0; border-radius: 10px; cursor: pointer; min-height: 40px; }
+.segbtn.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.ghost.surprise { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.thumb { width: 100%; height: 150px; border-radius: 12px; overflow: hidden; background: var(--accent-soft); margin-bottom: 10px; }
+.thumb.big { height: 220px; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 3rem; background: linear-gradient(135deg, var(--accent-soft), var(--card)); }
+.rate { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
+.star { color: #e0a020; font-weight: 700; margin-right: 2px; }
+.card.big h3 { font-size: 1.3rem; }

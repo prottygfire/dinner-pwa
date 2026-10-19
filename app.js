@@ -2,9 +2,9 @@
 // What was eaten is kept in localStorage and, when configured, mirrored to the Apps Script sheet.
 (function () {
   var L = DinnerLogic;
-  var LS = { cfg: 'dp_cfg', history: 'dp_history', pending: 'dp_pending' };
+  var LS = { cfg: 'dp_cfg', history: 'dp_history', pending: 'dp_pending', mode: 'dp_mode' };
   var SOURCE_LABEL = { new: '新發現', common: '常吃', reviewed: '吃過好評', saved: '你存的' };
-  var state = { places: [], meta: null, history: [], step: 'home', sel: {}, shown: [], seen: {}, logged: {}, cfg: { url: '', secret: '' }, sync: '' };
+  var state = { mode: 'near', surprise: null, places: [], meta: null, history: [], step: 'home', sel: {}, shown: [], seen: {}, logged: {}, cfg: { url: '', secret: '' }, sync: '' };
 
   function load(key, fallback) { try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
   function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* private mode: keep going in memory */ } }
@@ -61,7 +61,11 @@
   // ---- helpers ----
   function today() { return L.dateKey(new Date()); }
   function recent() { return L.recentNames(state.history, state.meta ? state.meta.avoid_recent_days : 7, today()); }
-  function fullSel() { return Object.assign({}, state.sel, { exclude: recent() }); }
+  function baseKm() { return L.MODES[state.mode].baseKm; }
+  function fullSel() { return Object.assign({ maxKm: baseKm() }, state.sel, { exclude: recent() }); }
+  function pool() { return L.filter(state.places, { maxKm: baseKm() }); }
+  function defaultMode() { var d = new Date(), day = d.getDay(); return (day === 6 || day === 0 || (day === 5 && d.getHours() >= 15)) ? 'outing' : 'near'; }
+  function setMode(m) { state.mode = m; save(LS.mode, m); render(); }
   function render() { var app = document.getElementById('app'); app.innerHTML = ''; app.appendChild(view()); }
 
   function reset() { state.sel = { tags: [] }; state.shown = []; state.seen = {}; state.logged = {}; state.step = 'home'; render(); }
@@ -81,20 +85,32 @@
     if (s.cuisine) items.push(s.cuisine);
     (s.tags || []).forEach(function (t) { items.push(t); });
     if (s.maxKm != null && s.maxKm < 99) items.push('≤' + s.maxKm + ' 公里');
+    if (state.mode === 'outing') items.unshift('出遊');
     return h('div', { class: 'crumbs' }, items.map(function (t) { return h('span', { class: 'chip' }, t); }));
   }
 
   function remaining() { return L.filter(state.places, fullSel()).length; }
 
+  function modeSwitch() {
+    return h('div', { class: 'seg' }, ['near', 'outing'].map(function (m) {
+      return h('button', { class: 'segbtn' + (state.mode === m ? ' on' : ''), on: { click: function () { setMode(m); } } }, L.MODES[m].label);
+    }));
+  }
+
   function viewHome() {
     var hist = state.history.slice(0, 7);
     var ex = Object.keys(recent()).length;
+    var n = pool().length;
+    var sub = state.mode === 'near' ? '北投到石牌，' + n + ' 個選項' : '北投、石牌加全台北，' + n + ' 個選項';
     return h('div', {},
       header('今晚吃什麼', null),
-      h('div', { class: 'hero' }, h('div', { class: 'big' }, '🍜'), h('p', { class: 'sub' }, '北投到石牌，' + state.places.length + ' 個選項' + (ex ? '（近 ' + (state.meta.avoid_recent_days) + ' 天吃過的 ' + ex + ' 間已先排除）' : ''))),
+      modeSwitch(),
+      h('div', { class: 'hero' }, h('div', { class: 'big' }, state.mode === 'near' ? '🍜' : '🚇'),
+        h('p', { class: 'sub' }, sub + (ex ? '（近 ' + (state.meta.avoid_recent_days) + ' 天吃過的 ' + ex + ' 間已先排除）' : ''))),
       h('button', { class: 'primary', on: { click: function () { state.sel = { tags: [] }; go('form'); } } }, '一步步幫我選'),
       h('div', { class: 'row' },
-        h('button', { class: 'ghost', on: { click: function () { state.sel = { tags: [] }; state.step = 'results'; state.shown = []; state.seen = {}; drawMore(); render(); } } }, '直接給我 3 個')),
+        h('button', { class: 'ghost', on: { click: function () { state.sel = { tags: [] }; state.step = 'results'; state.shown = []; state.seen = {}; drawMore(); render(); } } }, '直接給我 3 個'),
+        h('button', { class: 'ghost surprise', on: { click: function () { state.sel = { tags: [] }; rollSurprise(); go('surprise'); } } }, '🎲 給我驚喜')),
       hist.length ? h('div', {}, h('p', { class: 'sub', style: 'margin-top:22px' }, '最近吃過'),
         h('ul', { class: 'hist' }, hist.map(function (m) { return h('li', {}, h('span', {}, m.name), h('span', { class: 'meta' }, m.date.slice(5))); }))) : null,
       state.sync ? h('p', { class: 'status err' }, state.sync) : null);
@@ -142,10 +158,10 @@
   }
 
   function viewDistance() {
-    var btns = L.DISTANCE_BANDS.map(function (b) {
+    var btns = L.MODES[state.mode].bands.map(function (b) {
       var n = L.filter(state.places, Object.assign({}, fullSel(), { maxKm: b.maxKm })).length;
       return h('button', { class: 'opt' + (b.id === 'all' ? ' wide' : ''), disabled: n === 0 ? 'disabled' : false, on: { click: function () {
-        state.sel.maxKm = b.maxKm; state.shown = []; state.seen = {}; drawMore(); go('results');
+        state.sel.maxKm = Math.min(b.maxKm, baseKm()); state.shown = []; state.seen = {}; drawMore(); go('results');
       } } }, h('b', {}, b.label), h('small', {}, b.hint + '・' + n + ' 個'));
     });
     return h('div', {}, header('第 4 步', function () { go('tags'); }), crumbs(), h('p', { class: 'question' }, '要走多遠？'), optionsView(btns));
@@ -176,17 +192,69 @@
     render();
   }
 
-  function card(p) {
-    var meta = [p.cat, p.rating ? '★' + p.rating + (p.reviews ? '（' + p.reviews + '）' : '') : null, p.km != null ? p.km + ' 公里' : '街邊／市場'].filter(Boolean).join('・');
+  function ratingLine(p) {
+    if (p.rating == null) return h('div', { class: 'meta' }, p.cat || '');
+    return h('div', { class: 'rate' }, h('span', { class: 'star' }, '★ ' + p.rating.toFixed(1)),
+      p.reviews ? h('span', { class: 'meta' }, '（' + p.reviews.toLocaleString() + ' 則評論）') : null,
+      p.cat ? h('span', { class: 'meta' }, '・' + p.cat) : null);
+  }
+
+  function emojiFor(p) {
+    return p.forms.indexOf('麵') >= 0 ? '🍜' : p.forms.indexOf('鍋物') >= 0 ? '🍲' : p.forms.indexOf('肉') >= 0 ? '🥩'
+      : p.forms.indexOf('輕食') >= 0 ? '🥪' : p.forms.indexOf('小吃') >= 0 ? '🥟' : '🍚';
+  }
+
+  function thumb(p, big) {
+    var url = L.photoUrl(p.img, big ? 480 : 240, big ? 320 : 180);
+    var cls = 'thumb' + (big ? ' big' : '');
+    if (!url) return h('div', { class: cls }, h('div', { class: 'ph' }, emojiFor(p)));
+    var img = h('img', { src: url, alt: p.name, loading: 'lazy', referrerpolicy: 'no-referrer' });
+    var box = h('div', { class: cls }, img);
+    img.addEventListener('error', function () { box.innerHTML = ''; box.appendChild(h('div', { class: 'ph' }, emojiFor(p))); });
+    return box;
+  }
+
+  function distLine(p) {
+    return p.km != null ? p.km + ' 公里' + (p.zone === 'far' ? '・出遊' : '') : '街邊／市場';
+  }
+
+  function mealButtons(p) {
     var done = state.logged[p.id];
+    return h('div', { class: 'actions' },
+      h('a', { class: 'ghost', href: p.url, target: '_blank', rel: 'noopener' }, '看地圖'),
+      done ? h('button', { class: 'ghost', on: { click: function () { undoMeal(p); } } }, h('span', { class: 'done' }, '✓ 已記錄'), '（復原）')
+           : h('button', { class: 'primary', on: { click: function () { logMeal(p); } } }, '今天吃這個'));
+  }
+
+  function card(p) {
     return h('div', { class: 'card' },
-      h('h3', {}, p.name, h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source])),
-      h('div', { class: 'meta' }, meta),
-      p.addr ? h('div', { class: 'meta' }, p.addr) : null,
-      h('div', { class: 'actions' },
-        h('a', { class: 'ghost', href: p.url, target: '_blank', rel: 'noopener' }, '看地圖'),
-        done ? h('button', { class: 'ghost', on: { click: function () { undoMeal(p); } } }, h('span', { class: 'done' }, '✓ 已記錄'), '（復原）')
-             : h('button', { class: 'primary', on: { click: function () { logMeal(p); } } }, '今天吃這個')));
+      thumb(p, false),
+      h('div', { class: 'cbody' },
+        h('h3', {}, p.name, h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source])),
+        ratingLine(p),
+        h('div', { class: 'meta' }, distLine(p) + (p.addr ? '・' + p.addr : '')),
+        mealButtons(p)));
+  }
+
+  // ---- surprise ----
+  function rollSurprise() {
+    state.surprise = L.surprise(state.places, { maxKm: baseKm(), exclude: recent() }, Math.random);
+  }
+
+  function viewSurprise() {
+    var p = state.surprise;
+    var body = !p ? h('div', { class: 'empty' }, '找不到可以推薦的店。') :
+      h('div', { class: 'card big' },
+        thumb(p, true),
+        h('p', { class: 'sub', style: 'margin:10px 0 2px' }, '🎉 今晚就吃這間！'),
+        h('h3', {}, p.name, h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source])),
+        ratingLine(p),
+        h('div', { class: 'meta' }, distLine(p) + (p.addr ? '・' + p.addr : '')),
+        mealButtons(p));
+    return h('div', {}, header('給我驚喜', function () { go('home'); }), body,
+      h('div', { class: 'row' },
+        h('button', { class: 'ghost', on: { click: function () { rollSurprise(); render(); } } }, '🎲 再抽一次'),
+        h('button', { class: 'ghost', on: { click: reset } }, '回首頁')));
   }
 
   function viewResults() {
@@ -213,7 +281,7 @@
       h('label', { for: 's-secret' }, '暗號（APP_SECRET）'),
       h('input', { id: 's-secret', name: 'secret', type: 'password', value: state.cfg.secret, autocomplete: 'off' }),
       h('div', { class: 'row' }, h('button', { class: 'primary', type: 'submit' }, '儲存並同步')),
-      h('p', { class: 'status' }, '資料更新於 ' + (state.meta ? state.meta.built : '') + '・共 ' + state.places.length + ' 個選項・近 ' + (state.meta ? state.meta.avoid_recent_days : 7) + ' 天吃過的不會再出現'));
+      h('p', { class: 'status' }, '資料更新於 ' + (state.meta ? state.meta.built : '') + '・共 ' + state.places.length + ' 個選項（北投石牌 ' + state.places.filter(function (x) { return x.zone === 'near'; }).length + '、出遊 ' + state.places.filter(function (x) { return x.zone === 'far'; }).length + '）・近 ' + (state.meta ? state.meta.avoid_recent_days : 7) + ' 天吃過的不會再出現'));
     return h('div', {}, header('設定', function () { go('home'); }), f);
   }
 
@@ -224,6 +292,7 @@
       case 'tags': return viewTags();
       case 'distance': return viewDistance();
       case 'results': return viewResults();
+      case 'surprise': return viewSurprise();
       case 'settings': return viewSettings();
       default: return viewHome();
     }
@@ -232,6 +301,7 @@
   // ---- boot ----
   state.cfg = load(LS.cfg, { url: '', secret: '' });
   state.history = load(LS.history, []);
+  state.mode = load(LS.mode, null) || defaultMode();
   fetch('places.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }).then(function (d) {
     state.places = d.places; state.meta = d.meta; state.sel = { tags: [] };
     render();
