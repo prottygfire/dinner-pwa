@@ -2,9 +2,9 @@
 // What was eaten is kept in localStorage and, when configured, mirrored to the Apps Script sheet.
 (function () {
   var L = DinnerLogic;
-  var LS = { cfg: 'dp_cfg', history: 'dp_history', pending: 'dp_pending', mode: 'dp_mode' };
+  var LS = { cfg: 'dp_cfg', history: 'dp_history', pending: 'dp_pending', mode: 'dp_mode', marks: 'dp_marks', seen: 'dp_seen' };
   var SOURCE_LABEL = { new: '新發現', common: '常吃', reviewed: '吃過好評', saved: '你存的' };
-  var state = { mode: 'near', surprise: null, places: [], meta: null, history: [], step: 'home', sel: {}, shown: [], seen: {}, logged: {}, cfg: { url: '', secret: '' }, sync: '' };
+  var state = { marks: {}, seen: 'all', q: '', mode: 'near', surprise: null, places: [], meta: null, history: [], step: 'home', sel: {}, shown: [], seen: {}, logged: {}, cfg: { url: '', secret: '' }, sync: '' };
 
   function load(key, fallback) { try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
   function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* private mode: keep going in memory */ } }
@@ -54,6 +54,10 @@
     return flushPending().then(function () { return api('list'); }).then(function (j) {
       state.history = L.mergeHistory(state.history, j.meals);
       save(LS.history, state.history);
+      return api('marks');
+    }).then(function (j) {
+      state.marks = j.marks || {};     // the sheet is the source of truth for marks (pending edits were flushed first)
+      save(LS.marks, state.marks);
       state.sync = '';
     }).catch(function (e) { state.sync = '同步失敗：' + e.message; });
   }
@@ -62,8 +66,9 @@
   function today() { return L.dateKey(new Date()); }
   function recent() { return L.recentNames(state.history, state.meta ? state.meta.avoid_recent_days : 7, today()); }
   function baseKm() { return L.MODES[state.mode].baseKm; }
-  function fullSel() { return Object.assign({ maxKm: baseKm() }, state.sel, { exclude: recent() }); }
-  function pool() { return L.filter(state.places, { maxKm: baseKm() }); }
+  function seenSel() { return { seen: state.seen === 'all' ? null : state.seen, marks: state.marks }; }
+  function fullSel() { return Object.assign({ maxKm: baseKm() }, seenSel(), state.sel, { exclude: recent() }); }
+  function pool() { return L.filter(state.places, Object.assign({ maxKm: baseKm() }, seenSel())); }
   function defaultMode() { var d = new Date(), day = d.getDay(); return (day === 6 || day === 0 || (day === 5 && d.getHours() >= 15)) ? 'outing' : 'near'; }
   function setMode(m) { state.mode = m; save(LS.mode, m); render(); }
   function render() { var app = document.getElementById('app'); app.innerHTML = ''; app.appendChild(view()); }
@@ -97,6 +102,51 @@
     }));
   }
 
+  function seenSwitch() {
+    var opts = [['all', '全部'], ['unseen', '沒吃過'], ['liked', '好吃的']];
+    return h('div', { class: 'seg small' }, opts.map(function (o) {
+      return h('button', { class: 'segbtn' + (state.seen === o[0] ? ' on' : ''), on: { click: function () { state.seen = o[0]; save(LS.seen, o[0]); render(); } } }, o[1]);
+    }));
+  }
+
+  // ---- 我的店家: search any place, mark it, edit the note; with no search it lists what is already marked ----
+  function rowFor(p) {
+    var cur = markOf(p);
+    var note = cur ? h('input', { class: 'note', type: 'text', placeholder: '備註（例如：點什麼好吃）', value: cur.n || '', maxlength: '120' }) : null;
+    if (note) note.addEventListener('change', function () { setMark(p, cur.s, note.value); });
+    return h('div', { class: 'mrow' },
+      h('div', { class: 'mtop' },
+        h('div', {}, h('b', {}, p.name), h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source]), markBadge(p)),
+        h('div', { class: 'meta' }, (p.rating != null ? '★' + p.rating.toFixed(1) + '・' : '') + (p.cat || '') + (p.km != null ? '・' + p.km + ' 公里' : ''))),
+      markChips(p), note);
+  }
+
+  function mineResults(q) {
+    q = (q || '').trim().toLowerCase();
+    var list;
+    if (!q) {
+      list = state.places.filter(function (p) { return markOf(p); })
+        .sort(function (a, b) { return (markOf(a).s === '好吃' ? 0 : 1) - (markOf(b).s === '好吃' ? 0 : 1); });
+    } else {
+      list = state.places.filter(function (p) { return (p.name + ' ' + (p.cat || '') + ' ' + (p.addr || '')).toLowerCase().indexOf(q) >= 0; }).slice(0, 40);
+    }
+    if (!list.length) return [h('div', { class: 'empty' }, q ? '找不到「' + q + '」。' : '還沒標記任何店。上面搜尋店名，點「吃過」或「好吃」。')];
+    return list.map(rowFor);
+  }
+
+  function viewMine() {
+    var box = h('div', {}, mineResults(state.q));
+    var input = h('input', { class: 'search', type: 'search', placeholder: '搜尋店名、類別、地址', value: state.q, autocomplete: 'off' });
+    input.addEventListener('input', function () {
+      state.q = input.value;
+      box.innerHTML = '';
+      mineResults(state.q).forEach(function (el) { box.appendChild(el); });
+    });
+    return h('div', {}, header('我的店家', function () { go('home'); }),
+      h('p', { class: 'sub' }, '標記會同步到試算表「晚餐」的分頁「店家」，也可以直接在那邊改。'),
+      input, box);
+  }
+
   function viewHome() {
     var hist = state.history.slice(0, 7);
     var ex = Object.keys(recent()).length;
@@ -107,10 +157,13 @@
       modeSwitch(),
       h('div', { class: 'hero' }, h('div', { class: 'big' }, state.mode === 'near' ? '🍜' : '🚇'),
         h('p', { class: 'sub' }, sub + (ex ? '（近 ' + (state.meta.avoid_recent_days) + ' 天吃過的 ' + ex + ' 間已先排除）' : ''))),
+      seenSwitch(),
       h('button', { class: 'primary', on: { click: function () { state.sel = { tags: [] }; go('form'); } } }, '一步步幫我選'),
       h('div', { class: 'row' },
         h('button', { class: 'ghost', on: { click: function () { state.sel = { tags: [] }; state.step = 'results'; state.shown = []; state.seen = {}; drawMore(); render(); } } }, '直接給我 3 個'),
         h('button', { class: 'ghost surprise', on: { click: function () { state.sel = { tags: [] }; rollSurprise(); go('surprise'); } } }, '🎲 給我驚喜')),
+      h('button', { class: 'ghost wide', style: 'margin-top:10px', on: { click: function () { state.q = ''; go('mine'); } } },
+        '📒 我的店家（找店、標記吃過／好吃' + (Object.keys(state.marks).length ? '，已標 ' + Object.keys(state.marks).length + ' 間' : '') + '）'),
       hist.length ? h('div', {}, h('p', { class: 'sub', style: 'margin-top:22px' }, '最近吃過'),
         h('ul', { class: 'hist' }, hist.map(function (m) { return h('li', {}, h('span', {}, m.name), h('span', { class: 'meta' }, m.date.slice(5))); }))) : null,
       state.sync ? h('p', { class: 'status err' }, state.sync) : null);
@@ -218,6 +271,37 @@
     return p.km != null ? p.km + ' 公里' + (p.zone === 'far' ? '・出遊' : '') : '街邊／市場';
   }
 
+  // ---- the user's own marks: 吃過 / 好吃 (+ a note), kept in the 店家 sheet ----
+  function markOf(p) { return state.marks[p.key] || null; }
+
+  function setMark(p, status, note) {
+    var cur = markOf(p);
+    var n = note != null ? note : (cur ? cur.n : '');
+    if (status) state.marks[p.key] = { s: status, n: n }; else delete state.marks[p.key];
+    save(LS.marks, state.marks);
+    queue('mark', { key: p.key, status: status || '', note: status ? n : '' });
+  }
+
+  function toggleMark(p, status) {
+    var cur = markOf(p);
+    setMark(p, cur && cur.s === status ? '' : status);
+    render();
+  }
+
+  function markChips(p) {
+    var cur = markOf(p);
+    return h('div', { class: 'marks' }, ['吃過', '好吃'].map(function (s) {
+      var on = cur && cur.s === s;
+      return h('button', { class: 'mk' + (on ? ' on ' + (s === '好吃' ? 'love' : 'ate') : ''), on: { click: function () { toggleMark(p, s); } } },
+        (on ? '✓ ' : (s === '好吃' ? '♡ ' : '')) + s);
+    }));
+  }
+
+  function markBadge(p) {
+    var cur = markOf(p);
+    return cur ? h('span', { class: 'badge mark ' + (cur.s === '好吃' ? 'love' : 'ate') }, (cur.s === '好吃' ? '♥ ' : '') + cur.s) : null;
+  }
+
   function mealButtons(p) {
     var done = state.logged[p.id];
     return h('div', { class: 'actions' },
@@ -230,15 +314,15 @@
     return h('div', { class: 'card' },
       thumb(p, false),
       h('div', { class: 'cbody' },
-        h('h3', {}, p.name, h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source])),
+        h('h3', {}, p.name, h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source]), markBadge(p)),
         ratingLine(p),
         h('div', { class: 'meta' }, distLine(p) + (p.addr ? '・' + p.addr : '')),
-        mealButtons(p)));
+        mealButtons(p), markChips(p)));
   }
 
   // ---- surprise ----
   function rollSurprise() {
-    state.surprise = L.surprise(state.places, { maxKm: baseKm(), exclude: recent() }, Math.random);
+    state.surprise = L.surprise(state.places, { maxKm: baseKm(), exclude: recent(), marks: state.marks, seen: state.seen === 'liked' ? 'liked' : 'unseen' }, Math.random);
   }
 
   function viewSurprise() {
@@ -247,10 +331,10 @@
       h('div', { class: 'card big' },
         thumb(p, true),
         h('p', { class: 'sub', style: 'margin:10px 0 2px' }, '🎉 今晚就吃這間！'),
-        h('h3', {}, p.name, h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source])),
+        h('h3', {}, p.name, h('span', { class: 'badge ' + p.source }, SOURCE_LABEL[p.source]), markBadge(p)),
         ratingLine(p),
         h('div', { class: 'meta' }, distLine(p) + (p.addr ? '・' + p.addr : '')),
-        mealButtons(p));
+        mealButtons(p), markChips(p));
     return h('div', {}, header('給我驚喜', function () { go('home'); }), body,
       h('div', { class: 'row' },
         h('button', { class: 'ghost', on: { click: function () { rollSurprise(); render(); } } }, '🎲 再抽一次'),
@@ -293,6 +377,7 @@
       case 'distance': return viewDistance();
       case 'results': return viewResults();
       case 'surprise': return viewSurprise();
+      case 'mine': return viewMine();
       case 'settings': return viewSettings();
       default: return viewHome();
     }
@@ -302,6 +387,8 @@
   state.cfg = load(LS.cfg, { url: '', secret: '' });
   state.history = load(LS.history, []);
   state.mode = load(LS.mode, null) || defaultMode();
+  state.marks = load(LS.marks, {});
+  state.seen = load(LS.seen, 'all');
   fetch('places.json', { cache: 'no-cache' }).then(function (r) { return r.json(); }).then(function (d) {
     state.places = d.places; state.meta = d.meta; state.sel = { tags: [] };
     render();

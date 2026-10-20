@@ -59,3 +59,19 @@ form.settings input { width: 100%; padding: 10px; border: 1.5px solid var(--line
 .rate { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
 .star { color: #e0a020; font-weight: 700; margin-right: 2px; }
 .card.big h3 { font-size: 1.3rem; }
+
+.seg.small { margin: 2px 0 10px; }
+.seg.small .segbtn { font-size: .88rem; padding: 6px 0; min-height: 34px; }
+.ghost.wide { width: 100%; }
+.marks { display: flex; gap: 8px; margin-top: 8px; }
+.mk { flex: 1; background: none; border: 1.5px solid var(--line); color: var(--muted); border-radius: 10px; padding: 8px 0; font: inherit; font-size: .92rem; cursor: pointer; min-height: 38px; }
+.mk.on.ate { background: #e3eef8; border-color: #2b6aa6; color: #2b6aa6; font-weight: 700; }
+.mk.on.love { background: #fde4e4; border-color: #d04545; color: #d04545; font-weight: 700; }
+@media (prefers-color-scheme: dark) { .mk.on.ate { background: #1f3042; color: #8fc0ee; border-color: #8fc0ee; } .mk.on.love { background: #4a2326; color: #f08a8a; border-color: #f08a8a; } }
+.badge.mark.ate { background: #e3eef8; color: #2b6aa6; }
+.badge.mark.love { background: #fde4e4; color: #d04545; }
+@media (prefers-color-scheme: dark) { .badge.mark.ate { background: #1f3042; color: #8fc0ee; } .badge.mark.love { background: #4a2326; color: #f08a8a; } }
+.search, .note { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; font: inherit; background: var(--card); color: var(--ink); margin-bottom: 10px; }
+.note { margin: 8px 0 0; font-size: .92rem; }
+.mrow { background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 10px; }
+.mtop b { margin-right: 6px; }

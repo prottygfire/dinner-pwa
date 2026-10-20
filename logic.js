@@ -45,6 +45,11 @@ var DinnerLogic = (function () {
       for (var i = 0; i < sel.tags.length; i++) if (p.tags.indexOf(sel.tags[i]) < 0) return false;
     }
     if (sel.maxKm != null && p.km != null && p.km > sel.maxKm) return false;
+    if (sel.seen) {
+      var mk = sel.marks && sel.marks[p.key];
+      if (sel.seen === 'unseen' && mk) return false;              // hide everything the user marked 吃過 / 好吃
+      if (sel.seen === 'liked' && !(mk && mk.s === '好吃')) return false;
+    }
     return true;
   }
 
